@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+
+import gflags
+import multiprocessing
+import ssh
+import sys
+import tailer
+from urllib2 import urlparse
+
+FLAGS = gflags.FLAGS
+
+gflags.DEFINE_list("files", [],
+                    "comma sperated uri, e.g. file:///tmp/1.txt,ssh://chris@remotehost/tmp/2.txt")
+
+def map_tail(filename):
+    try:
+        uri = urlparse.urlparse(filename)
+        if uri.scheme == "file":
+            for line in tailer.follow(open(uri.path)):
+                print line
+        elif uri.scheme == "ssh":
+            client = ssh.SSHClient()
+            client.set_missing_host_key_policy(ssh.AutoAddPolicy())
+            host = uri.netloc.split('@')[-1].split(':')[0]
+            try:
+                port = uri.netloc.split('@')[-1].split(':')[1]
+            except:
+                port = 22
+            user = uri.netloc.split('@')[0].split(':')[0]
+            try:
+                password = uri.netloc.split('@')[0].split(':')[1]
+            except:
+                password = None
+            client.connect(host, port=port, username=user, password=password)
+            stdin, stdout, stderr = client.exec_command("tail -f %s" % uri.path)
+            for line in stdout:
+                print line,
+    except KeyboardInterrupt:
+        return
+
+def tail():
+    pool = multiprocessing.Pool(len(FLAGS.files))
+    response = pool.map_async(map_tail, FLAGS.files)
+    try:
+        response.wait()
+    except KeyboardInterrupt:
+        return
+
+if __name__ == "__main__":
+    try:
+        argv = FLAGS(sys.argv)[1:]  # parse flags
+    except gflags.FlagsError, e:
+        print '%s\\nUsage: %s ARGS\\n%s' % (e, sys.argv[0], FLAGS)
+        sys.exit(1)
+
+    tail()
